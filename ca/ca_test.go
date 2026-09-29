@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"filippo.io/torchwood"
-	"github.com/bwesterb/mtc"
-	"github.com/bwesterb/mtc/mirror"
+	"github.com/bob-beck/cloudflare-mtc"
+	"github.com/bob-beck/cloudflare-mtc/mirror"
 	"golang.org/x/mod/sumdb/note"
 )
 

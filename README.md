@@ -57,7 +57,7 @@ Installing
 Go 1.27 or later is required (for `crypto/mldsa`).
 
 ```
-$ go install github.com/bwesterb/mtc/cmd/mtc@latest
+$ go install github.com/bob-beck/cloudflare-mtc/cmd/mtc@latest
 ```
 
 Creating a CA
@@ -244,7 +244,7 @@ standalone one.
 Code layout
 -----------
 
-- `github.com/bwesterb/mtc` -- the formats: trust anchor IDs and patterns,
+- `github.com/bob-beck/cloudflare-mtc` -- the formats: trust anchor IDs and patterns,
   certificate property lists, `MTCLogEntry`, `MTCProof`, certificate and CA
   certificate construction, landmarks, cosigners, and verification.
 - `ca` -- the CA.

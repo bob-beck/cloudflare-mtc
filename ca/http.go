@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"filippo.io/torchwood"
-	"github.com/bwesterb/mtc"
+	"github.com/bob-beck/cloudflare-mtc"
 )
 
 // Handler returns an HTTP handler that serves the CA at the root of its

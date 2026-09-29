@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"filippo.io/torchwood"
-	"github.com/bwesterb/mtc"
-	"github.com/bwesterb/mtc/internal/tlogstore"
+	"github.com/bob-beck/cloudflare-mtc"
+	"github.com/bob-beck/cloudflare-mtc/internal/tlogstore"
 	"github.com/nightlyone/lockfile"
 	"golang.org/x/mod/sumdb/note"
 	"golang.org/x/mod/sumdb/tlog"

@@ -1,4 +1,4 @@
-module github.com/bwesterb/mtc
+module github.com/bob-beck/cloudflare-mtc
 
 go 1.27.0
 

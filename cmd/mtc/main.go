@@ -25,9 +25,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bwesterb/mtc"
-	"github.com/bwesterb/mtc/ca"
-	"github.com/bwesterb/mtc/mirror"
+	"github.com/bob-beck/cloudflare-mtc"
+	"github.com/bob-beck/cloudflare-mtc/ca"
+	"github.com/bob-beck/cloudflare-mtc/mirror"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/mod/sumdb/tlog"
 	"golang.org/x/sync/errgroup"
