@@ -22,7 +22,12 @@ accepted by OpenSSL's MTC implementation (`s_client` / `s_server` with
 
 The draft leaves the final OIDs and the `trust_anchors` codepoint to IANA;
 this code uses the early experimentation OIDs of -06
-(`1.3.6.1.4.1.44363.47.0`, `.47.3` and `.47.4`).
+(`1.3.6.1.4.1.44363.47.0`, `.47.3` and `.47.4`), as OpenSSL does. IANA has
+since assigned `id-alg-mtcProof` (`1.3.6.1.5.5.7.6.67`),
+`id-rdna-trustAnchorID` (`1.3.6.1.5.5.7.25.3`) and
+`id-pe-mtcCertificationAuthority-SHA256` (`1.3.6.1.5.5.7.1.38`); they are
+defined in `oids.go` and named by `mtc inspect cert`, but not yet issued or
+accepted.
 
 Don't use this, it's my giant hack of the cloudflare MTC just for testing.
 Run Away.

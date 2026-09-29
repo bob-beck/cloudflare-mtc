@@ -11,6 +11,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
@@ -781,6 +782,28 @@ func inspectCommand() *cli.Command {
 	}
 }
 
+// algorithmOID returns the OID of a DER AlgorithmIdentifier.
+func algorithmOID(der []byte) (asn1.ObjectIdentifier, error) {
+	var alg struct {
+		Algorithm  asn1.ObjectIdentifier
+		Parameters asn1.RawValue `asn1:"optional"`
+	}
+	if rest, err := asn1.Unmarshal(der, &alg); err != nil || len(rest) != 0 {
+		return nil, errors.New("malformed AlgorithmIdentifier")
+	}
+	return alg.Algorithm, nil
+}
+
+// describeName returns the trust anchor ID of a trust anchor ID name, with
+// the attribute OID, or else fallback.
+func describeName(der []byte, fallback string) string {
+	id, oid, err := mtc.ParseTrustAnchorIDNameOID(der)
+	if err != nil {
+		return fallback
+	}
+	return fmt.Sprintf("%s = %s", mtc.DescribeOID(oid), id)
+}
+
 func inspectCert(der, props []byte) error {
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
@@ -794,15 +817,28 @@ func inspectCert(der, props []byte) error {
 	if err != nil {
 		return err
 	}
-	issuer, err := mtc.ParseTrustAnchorIDName(tbs.Issuer)
+	sigAlg, err := algorithmOID(tbs.Signature)
 	if err != nil {
-		return fmt.Errorf("issuer: %w", err)
+		return err
 	}
-	fmt.Printf("issuer      %s\n", issuer)
+	fmt.Printf("sig alg     %s\n", mtc.DescribeOID(sigAlg))
+	fmt.Printf("issuer      %s\n", describeName(tbs.Issuer, cert.Issuer.String()))
+	fmt.Printf("subject     %s\n", describeName(tbs.Subject, cert.Subject.String()))
 	fmt.Printf("serial      %#x (log %d, index %d)\n", serial, serial>>48, serial&mtc.MaxLogEntries)
-	fmt.Printf("subject     %s\n", cert.Subject)
-	fmt.Printf("dns names   %s\n", strings.Join(cert.DNSNames, ", "))
+	if len(cert.DNSNames) > 0 {
+		fmt.Printf("dns names   %s\n", strings.Join(cert.DNSNames, ", "))
+	}
 	fmt.Printf("validity    %s to %s\n", cert.NotBefore.Format(time.RFC3339), cert.NotAfter.Format(time.RFC3339))
+	for _, ext := range cert.Extensions {
+		crit := ""
+		if ext.Critical {
+			crit = " (critical)"
+		}
+		fmt.Printf("extension   %s%s\n", mtc.DescribeOID(ext.Id), crit)
+	}
+	if !sigAlg.Equal(mtc.OIDMTCProof) && !sigAlg.Equal(mtc.OIDMTCProofIANA) {
+		return nil
+	}
 	var proof mtc.MTCProof
 	if err := proof.UnmarshalBinary(cert.Signature); err != nil {
 		return fmt.Errorf("MTCProof: %w", err)

@@ -2,6 +2,7 @@ package mtc
 
 import (
 	"bytes"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
@@ -10,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/cryptobyte"
+	cbasn1 "golang.org/x/crypto/cryptobyte/asn1"
 	"golang.org/x/mod/sumdb/tlog"
 )
 
@@ -384,4 +387,54 @@ func TestCAReadsOwnFormats(t *testing.T) {
 	if cp.VerifySubtree(logID, 4, 8, tlog.Hash{8}, sig) {
 		t.Error("subtree signature verifies for another hash")
 	}
+}
+
+func TestIANAOIDs(t *testing.T) {
+	for _, tc := range []struct {
+		oid  string
+		want string
+	}{
+		{OIDMTCProofIANA.String(), "1.3.6.1.5.5.7.6.67"},
+		{OIDRDNATrustAnchorIDIANA.String(), "1.3.6.1.5.5.7.25.3"},
+		{OIDMTCCertificationAuthoritySHA256IANA.String(), "1.3.6.1.5.5.7.1.38"},
+	} {
+		if tc.oid != tc.want {
+			t.Errorf("got %s, want %s", tc.oid, tc.want)
+		}
+	}
+	if got := DescribeOID(OIDMTCProof); got != "1.3.6.1.4.1.44363.47.0 id-alg-mtcProof (draft experimental)" {
+		t.Errorf("DescribeOID: %q", got)
+	}
+	if got := DescribeOID(OIDMTCProofIANA); got != "1.3.6.1.5.5.7.6.67 id-alg-mtcProof (IANA)" {
+		t.Errorf("DescribeOID: %q", got)
+	}
+
+	// A name with the IANA attribute is recognised but not accepted.
+	id := MustParseTrustAnchorID("32473.1")
+	name := MarshalTrustAnchorIDName(id)
+	iana := marshalNameWithAttr(t, OIDRDNATrustAnchorIDIANA, id)
+	got, oid, err := ParseTrustAnchorIDNameOID(iana)
+	if err != nil || !got.Equal(id) || !oid.Equal(OIDRDNATrustAnchorIDIANA) {
+		t.Errorf("ParseTrustAnchorIDNameOID: %v %v %v", got, oid, err)
+	}
+	if _, err := ParseTrustAnchorIDName(iana); err == nil {
+		t.Error("ParseTrustAnchorIDName accepted the IANA attribute")
+	}
+	if _, err := ParseTrustAnchorIDName(name); err != nil {
+		t.Errorf("ParseTrustAnchorIDName: %v", err)
+	}
+}
+
+func marshalNameWithAttr(t *testing.T, oid asn1.ObjectIdentifier, id TrustAnchorID) []byte {
+	t.Helper()
+	b := cryptobyte.NewBuilder(nil)
+	b.AddASN1(cbasn1.SEQUENCE, func(dn *cryptobyte.Builder) {
+		dn.AddASN1(cbasn1.SET, func(rdn *cryptobyte.Builder) {
+			rdn.AddASN1(cbasn1.SEQUENCE, func(attr *cryptobyte.Builder) {
+				attr.AddASN1ObjectIdentifier(oid)
+				attr.AddASN1(tagRelativeOID, func(v *cryptobyte.Builder) { v.AddBytes(id) })
+			})
+		})
+	})
+	return b.BytesOrPanic()
 }

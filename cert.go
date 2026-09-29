@@ -46,6 +46,20 @@ func addTrustAnchorIDName(b *cryptobyte.Builder, id TrustAnchorID) {
 // ParseTrustAnchorIDName parses a DER Name of the form produced by
 // MarshalTrustAnchorIDName and returns the trust anchor ID.
 func ParseTrustAnchorIDName(der []byte) (TrustAnchorID, error) {
+	id, oid, err := ParseTrustAnchorIDNameOID(der)
+	if err != nil {
+		return nil, err
+	}
+	if !oid.Equal(OIDRDNATrustAnchorID) {
+		return nil, fmt.Errorf("name attribute is %s, not the draft experimental trust anchor ID", DescribeOID(oid))
+	}
+	return id, nil
+}
+
+// ParseTrustAnchorIDNameOID parses a DER Name holding a single trust anchor
+// ID attribute, with either the draft experimental or the IANA-assigned
+// id-rdna-trustAnchorID, and returns the ID and the attribute OID.
+func ParseTrustAnchorIDNameOID(der []byte) (TrustAnchorID, asn1.ObjectIdentifier, error) {
 	s := cryptobyte.String(der)
 	var dn, rdn, attr cryptobyte.String
 	var oid asn1.ObjectIdentifier
@@ -55,16 +69,16 @@ func ParseTrustAnchorIDName(der []byte) (TrustAnchorID, error) {
 		!rdn.ReadASN1(&attr, cbasn1.SEQUENCE) || !rdn.Empty() ||
 		!attr.ReadASN1ObjectIdentifier(&oid) ||
 		!attr.ReadASN1(&val, tagRelativeOID) || !attr.Empty() {
-		return nil, errors.New("name is not a single trust anchor ID attribute")
+		return nil, nil, errors.New("name is not a single trust anchor ID attribute")
 	}
-	if !oid.Equal(OIDRDNATrustAnchorID) {
-		return nil, errors.New("name is not a trust anchor ID")
+	if !oid.Equal(OIDRDNATrustAnchorID) && !oid.Equal(OIDRDNATrustAnchorIDIANA) {
+		return nil, nil, errors.New("name is not a trust anchor ID")
 	}
 	id := TrustAnchorID(append([]byte(nil), val...))
 	if err := id.Validate(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return id, nil
+	return id, oid, nil
 }
 
 func addX509Time(b *cryptobyte.Builder, t time.Time) {
