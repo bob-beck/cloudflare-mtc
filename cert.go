@@ -1,6 +1,7 @@
 package mtc
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ed25519"
 	"crypto/mldsa"
@@ -26,15 +27,15 @@ var tagRelativeOID = cbasn1.Tag(13)
 // See draft-ietf-plants-merkle-tree-certs-06, Section 5.1.
 func MarshalTrustAnchorIDName(id TrustAnchorID) []byte {
 	b := cryptobyte.NewBuilder(nil)
-	addTrustAnchorIDName(b, id)
+	addTrustAnchorIDName(b, ExperimentalOIDs.RDNATrustAnchorID, id)
 	return b.BytesOrPanic()
 }
 
-func addTrustAnchorIDName(b *cryptobyte.Builder, id TrustAnchorID) {
+func addTrustAnchorIDName(b *cryptobyte.Builder, attrType asn1.ObjectIdentifier, id TrustAnchorID) {
 	b.AddASN1(cbasn1.SEQUENCE, func(dn *cryptobyte.Builder) {
 		dn.AddASN1(cbasn1.SET, func(rdn *cryptobyte.Builder) {
 			rdn.AddASN1(cbasn1.SEQUENCE, func(attr *cryptobyte.Builder) {
-				attr.AddASN1ObjectIdentifier(OIDRDNATrustAnchorID)
+				attr.AddASN1ObjectIdentifier(attrType)
 				attr.AddASN1(tagRelativeOID, func(val *cryptobyte.Builder) {
 					val.AddBytes(id)
 				})
@@ -43,17 +44,11 @@ func addTrustAnchorIDName(b *cryptobyte.Builder, id TrustAnchorID) {
 	})
 }
 
-// ParseTrustAnchorIDName parses a DER Name of the form produced by
-// MarshalTrustAnchorIDName and returns the trust anchor ID.
+// ParseTrustAnchorIDName parses a DER Name holding a single trust anchor ID
+// attribute, experimental or IANA, and returns the trust anchor ID.
 func ParseTrustAnchorIDName(der []byte) (TrustAnchorID, error) {
-	id, oid, err := ParseTrustAnchorIDNameOID(der)
-	if err != nil {
-		return nil, err
-	}
-	if !oid.Equal(OIDRDNATrustAnchorID) {
-		return nil, fmt.Errorf("name attribute is %s, not the draft experimental trust anchor ID", DescribeOID(oid))
-	}
-	return id, nil
+	id, _, err := ParseTrustAnchorIDNameOID(der)
+	return id, err
 }
 
 // ParseTrustAnchorIDNameOID parses a DER Name holding a single trust anchor
@@ -71,7 +66,7 @@ func ParseTrustAnchorIDNameOID(der []byte) (TrustAnchorID, asn1.ObjectIdentifier
 		!attr.ReadASN1(&val, tagRelativeOID) || !attr.Empty() {
 		return nil, nil, errors.New("name is not a single trust anchor ID attribute")
 	}
-	if !oid.Equal(OIDRDNATrustAnchorID) && !oid.Equal(OIDRDNATrustAnchorIDIANA) {
+	if !IsTrustAnchorIDAttribute(oid) {
 		return nil, nil, errors.New("name is not a trust anchor ID")
 	}
 	id := TrustAnchorID(append([]byte(nil), val...))
@@ -215,6 +210,10 @@ func Serial(logNumber uint16, index uint64) uint64 {
 //
 // See draft-ietf-plants-merkle-tree-certs-06, Section 6.2.
 func (tmpl *Template) MarshalTBSCertificate(caID TrustAnchorID, serial uint64) ([]byte, error) {
+	return tmpl.marshalTBSCertificate(caID, serial, ExperimentalOIDs)
+}
+
+func (tmpl *Template) marshalTBSCertificate(caID TrustAnchorID, serial uint64, oids OIDSet) ([]byte, error) {
 	if tmpl.NotAfter.Before(tmpl.NotBefore) {
 		return nil, errors.New("certificate notAfter is before notBefore")
 	}
@@ -224,8 +223,8 @@ func (tmpl *Template) MarshalTBSCertificate(caID TrustAnchorID, serial uint64) (
 			v.AddASN1Uint64(2) // v3
 		})
 		tbs.AddASN1Uint64(serial)
-		tbs.AddBytes(mtcProofAlgorithmIdentifier)
-		addTrustAnchorIDName(tbs, caID)
+		tbs.AddBytes(algorithmIdentifier(oids.MTCProof))
+		addTrustAnchorIDName(tbs, oids.RDNATrustAnchorID, caID)
 		addValidity(tbs, tmpl.NotBefore, tmpl.NotAfter)
 		if len(tmpl.Subject) == 0 {
 			tbs.AddASN1(cbasn1.SEQUENCE, func(*cryptobyte.Builder) {})
@@ -247,11 +246,19 @@ func (tmpl *Template) MarshalTBSCertificate(caID TrustAnchorID, serial uint64) (
 }
 
 // MarshalCertificate assembles an MTC certificate from its TBSCertificate and
-// MTCProof: the signatureAlgorithm is id-alg-mtcProof and the signatureValue
-// holds the serialized MTCProof.
+// MTCProof: the signatureAlgorithm is the TBSCertificate's signature field,
+// which must be id-alg-mtcProof, and the signatureValue holds the serialized
+// MTCProof.
 //
 // See draft-ietf-plants-merkle-tree-certs-06, Section 6.2.
 func MarshalCertificate(tbs []byte, proof *MTCProof) ([]byte, error) {
+	parsed, err := ParseTBSCertificate(tbs)
+	if err != nil {
+		return nil, err
+	}
+	if !isMTCProofAlgorithmIdentifier(parsed.Signature) {
+		return nil, errors.New("TBSCertificate signature is not id-alg-mtcProof")
+	}
 	p, err := proof.MarshalBinary()
 	if err != nil {
 		return nil, err
@@ -259,7 +266,7 @@ func MarshalCertificate(tbs []byte, proof *MTCProof) ([]byte, error) {
 	b := cryptobyte.NewBuilder(nil)
 	b.AddASN1(cbasn1.SEQUENCE, func(cert *cryptobyte.Builder) {
 		cert.AddBytes(tbs)
-		cert.AddBytes(mtcProofAlgorithmIdentifier)
+		cert.AddBytes(parsed.Signature)
 		cert.AddASN1BitString(p)
 	})
 	return b.Bytes()
@@ -314,7 +321,7 @@ func addExtension(b *cryptobyte.Builder, oid asn1.ObjectIdentifier, critical boo
 
 // marshalUnsignedCertificate returns an RFC 9925 unsigned certificate whose
 // subject is the trust anchor ID name of id.
-func marshalUnsignedCertificate(id TrustAnchorID, key crypto.PublicKey, notBefore, notAfter time.Time, exts func(*cryptobyte.Builder)) ([]byte, error) {
+func marshalUnsignedCertificate(attrType asn1.ObjectIdentifier, id TrustAnchorID, key crypto.PublicKey, notBefore, notAfter time.Time, exts func(*cryptobyte.Builder)) ([]byte, error) {
 	spki, err := x509.MarshalPKIXPublicKey(key)
 	if err != nil {
 		return nil, err
@@ -329,7 +336,7 @@ func marshalUnsignedCertificate(id TrustAnchorID, key crypto.PublicKey, notBefor
 			addUnsignedAlgorithmIdentifier(tbs)
 			addUnsignedIssuerName(tbs)
 			addValidity(tbs, notBefore, notAfter)
-			addTrustAnchorIDName(tbs, id)
+			addTrustAnchorIDName(tbs, attrType, id)
 			tbs.AddBytes(spki)
 			if exts != nil {
 				tbs.AddASN1(cbasn1.Tag(3).Constructed().ContextSpecific(), func(e *cryptobyte.Builder) {
@@ -350,6 +357,10 @@ func marshalUnsignedCertificate(id TrustAnchorID, key crypto.PublicKey, notBefor
 //
 // See draft-ietf-plants-merkle-tree-certs-06, Section 5.5.
 func MarshalCACertificate(p *CAParams) ([]byte, error) {
+	return marshalCACertificate(p, ExperimentalOIDs)
+}
+
+func marshalCACertificate(p *CAParams, oids OIDSet) ([]byte, error) {
 	if p.MinSerial < 1<<48 || p.MaxSerial < p.MinSerial {
 		return nil, errors.New("CA serial range must satisfy 2^48 <= min <= max")
 	}
@@ -360,7 +371,7 @@ func MarshalCACertificate(p *CAParams) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return marshalUnsignedCertificate(p.ID, p.Key, p.NotBefore, p.NotAfter, func(exts *cryptobyte.Builder) {
+	return marshalUnsignedCertificate(oids.RDNATrustAnchorID, p.ID, p.Key, p.NotBefore, p.NotAfter, func(exts *cryptobyte.Builder) {
 		// keyUsage: keyCertSign.
 		addExtension(exts, oidKeyUsage, true, func(v *cryptobyte.Builder) {
 			// Bit 5 set; two unused trailing bits.
@@ -378,7 +389,7 @@ func MarshalCACertificate(p *CAParams) ([]byte, error) {
 		addExtension(exts, oidSubjectKeyID, false, func(v *cryptobyte.Builder) {
 			v.AddASN1OctetString(p.ID)
 		})
-		addExtension(exts, OIDMTCCertificationAuthoritySHA256, true, func(v *cryptobyte.Builder) {
+		addExtension(exts, oids.MTCCertificationAuthoritySHA256, true, func(v *cryptobyte.Builder) {
 			v.AddASN1(cbasn1.SEQUENCE, func(seq *cryptobyte.Builder) {
 				seq.AddASN1(cbasn1.SEQUENCE, func(alg *cryptobyte.Builder) {
 					alg.AddASN1ObjectIdentifier(sigAlg)
@@ -403,7 +414,14 @@ func MarshalCACertificate(p *CAParams) ([]byte, error) {
 // does not define this; it is the form OpenSSL's
 // OSSL_MTC_COSIGNER_parse_certificates() reads.
 func MarshalCosignerCertificate(c *CosignerPublic, notBefore, notAfter time.Time) ([]byte, error) {
-	return marshalUnsignedCertificate(c.ID, c.Key, notBefore, notAfter, nil)
+	return marshalUnsignedCertificate(ExperimentalOIDs.RDNATrustAnchorID, c.ID, c.Key, notBefore, notAfter, nil)
+}
+
+// isMTCProofAlgorithmIdentifier reports whether der is the AlgorithmIdentifier
+// of id-alg-mtcProof, experimental or IANA, with absent parameters.
+func isMTCProofAlgorithmIdentifier(der []byte) bool {
+	return bytes.Equal(der, algorithmIdentifier(OIDMTCProof)) ||
+		bytes.Equal(der, algorithmIdentifier(OIDMTCProofIANA))
 }
 
 func signatureAlgorithmOID(key crypto.PublicKey) (asn1.ObjectIdentifier, error) {

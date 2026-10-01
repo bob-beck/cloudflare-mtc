@@ -25,9 +25,9 @@ this code uses the early experimentation OIDs of -06
 (`1.3.6.1.4.1.44363.47.0`, `.47.3` and `.47.4`), as OpenSSL does. IANA has
 since assigned `id-alg-mtcProof` (`1.3.6.1.5.5.7.6.67`),
 `id-rdna-trustAnchorID` (`1.3.6.1.5.5.7.25.3`) and
-`id-pe-mtcCertificationAuthority-SHA256` (`1.3.6.1.5.5.7.1.38`); they are
-defined in `oids.go` and named by `mtc inspect cert`, but not yet issued or
-accepted.
+`id-pe-mtcCertificationAuthority-SHA256` (`1.3.6.1.5.5.7.1.38`); the CA
+issues with the experimental OIDs, and parsing and verification accept
+either set (OpenSSL accepts only the experimental ones for now).
 
 Don't use this, it's my giant hack of the cloudflare MTC just for testing.
 Run Away.

@@ -51,7 +51,10 @@ func ParseCACertificate(der []byte) (*TrustedCA, error) {
 	found := false
 	for _, ext := range cert.Extensions {
 		switch {
-		case ext.Id.Equal(OIDMTCCertificationAuthoritySHA256):
+		case IsMTCCAExtension(ext.Id):
+			if found {
+				return nil, errors.New("certificate has both the experimental and the IANA MTC CA extension")
+			}
 			if !ext.Critical {
 				return nil, errors.New("MTC CA extension is not critical")
 			}
@@ -90,7 +93,7 @@ func ParseCosignerCertificate(der []byte) (*CosignerPublic, error) {
 		return nil, err
 	}
 	for _, ext := range cert.Extensions {
-		if ext.Id.Equal(OIDMTCCertificationAuthoritySHA256) {
+		if IsMTCCAExtension(ext.Id) {
 			return nil, errors.New("certificate is a CA certificate, not a cosigner certificate")
 		}
 	}
@@ -164,14 +167,13 @@ func Verify(der []byte, opts *VerifyOptions) (*VerifyResult, error) {
 		return nil, err
 	}
 
-	// Step 1: both signature algorithms are id-alg-mtcProof with absent
-	// parameters.
+	// Step 1: both signature algorithms are id-alg-mtcProof, experimental
+	// or IANA, with absent parameters, and are the same.
 	outerAlg, sigValue, err := certificateSignature(der)
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(outerAlg, mtcProofAlgorithmIdentifier) ||
-		!bytes.Equal(tbs.Signature, mtcProofAlgorithmIdentifier) {
+	if !isMTCProofAlgorithmIdentifier(outerAlg) || !bytes.Equal(outerAlg, tbs.Signature) {
 		return nil, errors.New("signature algorithm is not id-alg-mtcProof")
 	}
 

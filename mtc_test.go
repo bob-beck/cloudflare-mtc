@@ -2,6 +2,7 @@ package mtc
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/hex"
@@ -409,7 +410,7 @@ func TestIANAOIDs(t *testing.T) {
 		t.Errorf("DescribeOID: %q", got)
 	}
 
-	// A name with the IANA attribute is recognised but not accepted.
+	// A name with the IANA attribute is accepted.
 	id := MustParseTrustAnchorID("32473.1")
 	name := MarshalTrustAnchorIDName(id)
 	iana := marshalNameWithAttr(t, OIDRDNATrustAnchorIDIANA, id)
@@ -417,8 +418,8 @@ func TestIANAOIDs(t *testing.T) {
 	if err != nil || !got.Equal(id) || !oid.Equal(OIDRDNATrustAnchorIDIANA) {
 		t.Errorf("ParseTrustAnchorIDNameOID: %v %v %v", got, oid, err)
 	}
-	if _, err := ParseTrustAnchorIDName(iana); err == nil {
-		t.Error("ParseTrustAnchorIDName accepted the IANA attribute")
+	if got, err := ParseTrustAnchorIDName(iana); err != nil || !got.Equal(id) {
+		t.Errorf("ParseTrustAnchorIDName with the IANA attribute: %v %v", got, err)
 	}
 	if _, err := ParseTrustAnchorIDName(name); err != nil {
 		t.Errorf("ParseTrustAnchorIDName: %v", err)
@@ -437,4 +438,128 @@ func marshalNameWithAttr(t *testing.T, oid asn1.ObjectIdentifier, id TrustAnchor
 		})
 	})
 	return b.BytesOrPanic()
+}
+
+// issueOne returns a certificate for a one-entry log [0, 1) of the CA with
+// the given ID and key, written with oids, with a CA cosignature.
+func issueOne(t *testing.T, c *Cosigner, oids OIDSet) []byte {
+	t.Helper()
+	now := time.Now()
+	tmpl, err := NewTemplateFromX509(&x509.Certificate{
+		DNSNames:    []string{"a.example"},
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}, c.Key.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl.NotBefore, tmpl.NotAfter = now.Add(-time.Minute), now.Add(time.Hour)
+	tbs, err := tmpl.marshalTBSCertificate(c.ID, Serial(1, 0), oids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseTBSCertificate(tbs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := parsed.LogEntry(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The hash of the one-entry subtree [0, 1) is the entry hash.
+	h := EntryHash(entry)
+	sig, err := c.SignSubtree(LogID(c.ID, 1), 0, 1, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := MarshalCertificate(tbs, &MTCProof{
+		Start: 0, End: 1,
+		Signatures: []SubtreeSignature{{CosignerID: c.ID, Signature: sig}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
+}
+
+func TestAcceptIANAOIDs(t *testing.T) {
+	key, err := GenerateCosignerKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewCosigner(MustParseTrustAnchorID("32473.5"), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	params := &CAParams{
+		ID: c.ID, Key: key.PublicKey(),
+		MinSerial: Serial(1, 0), MaxSerial: 1<<64 - 1,
+		NotBefore: now, NotAfter: now.Add(time.Hour),
+	}
+	for _, caOIDs := range []OIDSet{ExperimentalOIDs, IANAOIDs} {
+		caDER, err := marshalCACertificate(params, caOIDs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ca, err := ParseCACertificate(caDER)
+		if err != nil {
+			t.Fatalf("CA certificate with %v: %v", caOIDs.MTCCertificationAuthoritySHA256, err)
+		}
+		if _, err := ParseCosignerCertificate(caDER); err == nil {
+			t.Error("CA certificate parsed as a cosigner certificate")
+		}
+		for _, certOIDs := range []OIDSet{ExperimentalOIDs, IANAOIDs} {
+			der := issueOne(t, c, certOIDs)
+			res, err := Verify(der, &VerifyOptions{CAs: []*TrustedCA{ca}})
+			if err != nil {
+				t.Errorf("CA %v, certificate %v: %v", caOIDs.MTCCertificationAuthoritySHA256, certOIDs.MTCProof, err)
+				continue
+			}
+			if res.Index != 0 || res.LogNumber != 1 {
+				t.Errorf("result %+v", res)
+			}
+		}
+	}
+
+	// A certificate whose inner and outer signature algorithms are the two
+	// different mtcProof OIDs is rejected.
+	der := issueOne(t, c, IANAOIDs)
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := cryptobyte.NewBuilder(nil)
+	b.AddASN1(cbasn1.SEQUENCE, func(outer *cryptobyte.Builder) {
+		outer.AddBytes(cert.RawTBSCertificate)
+		outer.AddBytes(algorithmIdentifier(OIDMTCProof))
+		outer.AddASN1BitString(cert.Signature)
+	})
+	mixed := b.BytesOrPanic()
+	caDER, _ := marshalCACertificate(params, ExperimentalOIDs)
+	ca, _ := ParseCACertificate(caDER)
+	if _, err := Verify(mixed, &VerifyOptions{CAs: []*TrustedCA{ca}}); err == nil {
+		t.Error("mismatched inner and outer signature algorithms accepted")
+	}
+
+	// A CA certificate with both CA extensions is rejected.
+	both, err := marshalUnsignedCertificate(OIDRDNATrustAnchorID, c.ID, key.PublicKey(), now, now.Add(time.Hour), func(exts *cryptobyte.Builder) {
+		for _, oid := range []asn1.ObjectIdentifier{OIDMTCCertificationAuthoritySHA256, OIDMTCCertificationAuthoritySHA256IANA} {
+			addExtension(exts, oid, true, func(v *cryptobyte.Builder) {
+				v.AddASN1(cbasn1.SEQUENCE, func(seq *cryptobyte.Builder) {
+					seq.AddASN1(cbasn1.SEQUENCE, func(alg *cryptobyte.Builder) {
+						alg.AddASN1ObjectIdentifier(OIDMLDSA44)
+					})
+					seq.AddASN1Uint64(Serial(1, 0))
+					seq.AddASN1Uint64(1<<64 - 1)
+				})
+			})
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseCACertificate(both); err == nil {
+		t.Error("CA certificate with both CA extensions accepted")
+	}
 }

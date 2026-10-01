@@ -836,7 +836,7 @@ func inspectCert(der, props []byte) error {
 		}
 		fmt.Printf("extension   %s%s\n", mtc.DescribeOID(ext.Id), crit)
 	}
-	if !sigAlg.Equal(mtc.OIDMTCProof) && !sigAlg.Equal(mtc.OIDMTCProofIANA) {
+	if !mtc.IsMTCProofOID(sigAlg) {
 		return nil
 	}
 	var proof mtc.MTCProof

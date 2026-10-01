@@ -9,9 +9,9 @@ import (
 // OIDMTCProof, OIDRDNATrustAnchorID and OIDMTCCertificationAuthoritySHA256
 // are the early experimentation OIDs of
 // draft-ietf-plants-merkle-tree-certs-06, Sections 5.1, 5.5 and 6.2, and are
-// what this package issues and accepts, as does OpenSSL's MTC
-// implementation. The OIDs IANA assigned for the same purposes are the
-// ...IANA variables; they are recognised by DescribeOID only.
+// what this package issues, as does OpenSSL's MTC implementation. The OIDs
+// IANA assigned for the same purposes are the ...IANA variables. Parsing and
+// verification accept either set.
 var (
 	// OIDMTCProof is id-alg-mtcProof (Section 6.2).
 	OIDMTCProof = asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 44363, 47, 0}
@@ -65,12 +65,52 @@ func oidDER(oid asn1.ObjectIdentifier) []byte {
 	return b
 }
 
-// mtcProofAlgorithmIdentifier is the DER AlgorithmIdentifier for
-// id-alg-mtcProof, with absent parameters (Section 6.2).
-var mtcProofAlgorithmIdentifier = func() []byte {
-	o := oidDER(OIDMTCProof)
+// An OIDSet is the set of OIDs a certificate is written with.
+type OIDSet struct {
+	MTCProof                        asn1.ObjectIdentifier
+	RDNATrustAnchorID               asn1.ObjectIdentifier
+	MTCCertificationAuthoritySHA256 asn1.ObjectIdentifier
+}
+
+// ExperimentalOIDs are the draft experimental OIDs, which this package
+// issues.
+var ExperimentalOIDs = OIDSet{
+	MTCProof:                        OIDMTCProof,
+	RDNATrustAnchorID:               OIDRDNATrustAnchorID,
+	MTCCertificationAuthoritySHA256: OIDMTCCertificationAuthoritySHA256,
+}
+
+// IANAOIDs are the IANA-assigned OIDs.
+var IANAOIDs = OIDSet{
+	MTCProof:                        OIDMTCProofIANA,
+	RDNATrustAnchorID:               OIDRDNATrustAnchorIDIANA,
+	MTCCertificationAuthoritySHA256: OIDMTCCertificationAuthoritySHA256IANA,
+}
+
+// IsMTCProofOID reports whether oid is id-alg-mtcProof, experimental or
+// IANA.
+func IsMTCProofOID(oid asn1.ObjectIdentifier) bool {
+	return oid.Equal(OIDMTCProof) || oid.Equal(OIDMTCProofIANA)
+}
+
+// IsTrustAnchorIDAttribute reports whether oid is id-rdna-trustAnchorID,
+// experimental or IANA.
+func IsTrustAnchorIDAttribute(oid asn1.ObjectIdentifier) bool {
+	return oid.Equal(OIDRDNATrustAnchorID) || oid.Equal(OIDRDNATrustAnchorIDIANA)
+}
+
+// IsMTCCAExtension reports whether oid is
+// id-pe-mtcCertificationAuthority-SHA256, experimental or IANA.
+func IsMTCCAExtension(oid asn1.ObjectIdentifier) bool {
+	return oid.Equal(OIDMTCCertificationAuthoritySHA256) || oid.Equal(OIDMTCCertificationAuthoritySHA256IANA)
+}
+
+// algorithmIdentifier returns the DER AlgorithmIdentifier for oid with
+// absent parameters, as id-alg-mtcProof requires (Section 6.2).
+func algorithmIdentifier(oid asn1.ObjectIdentifier) []byte {
+	o := oidDER(oid)
 	return append([]byte{0x30, byte(len(o))}, o...)
-}()
+}
 
 // oidNames names the OIDs DescribeOID knows.
 var oidNames = []struct {
