@@ -49,6 +49,9 @@ type Config struct {
 	MinSerial uint64 `json:"min_serial"`
 	MaxSerial uint64 `json:"max_serial"`
 
+	// IANAOIDs issues with mtc.IANAOIDs rather than mtc.ExperimentalOIDs.
+	IANAOIDs bool `json:"iana_oids,omitempty"`
+
 	// Mirrors are c2sp.org/tlog-mirror mirrors that the CA pushes its log
 	// to and whose subtree cosignatures go in standalone certificates.
 	Mirrors []MirrorConfig `json:"mirrors,omitempty"`
@@ -103,6 +106,7 @@ type NewOpts struct {
 	PrefixURL        string
 	MaxLifetime      time.Duration
 	LandmarkInterval time.Duration
+	IANAOIDs         bool
 }
 
 // New creates a CA in dir, which must not exist yet: a fresh ML-DSA-44 CA
@@ -143,6 +147,7 @@ func New(dir string, opts NewOpts) (*CA, error) {
 		LandmarkInterval: Duration{opts.LandmarkInterval},
 		MinSerial:        mtc.Serial(opts.LogNumber, 0),
 		MaxSerial:        1<<64 - 1,
+		IANAOIDs:         opts.IANAOIDs,
 	}
 	if err := writeJSON(filepath.Join(dir, "config.json"), &cfg); err != nil {
 		return nil, err
@@ -281,6 +286,7 @@ func (ca *CA) caCertificate(notBefore, notAfter time.Time) ([]byte, error) {
 		NotBefore: notBefore,
 		NotAfter:  notAfter,
 		PrefixURL: ca.config.PrefixURL,
+		IANA:      ca.config.IANAOIDs,
 	})
 	if err != nil {
 		return nil, err
@@ -425,6 +431,7 @@ func (ca *CA) issueQueued(now time.Time, names []string, res *IssueResult) error
 			Rest:      r.Rest,
 			NotBefore: now,
 			NotAfter:  now.Add(lifetime),
+			IANA:      ca.config.IANAOIDs,
 		}
 		index := oldSize + uint64(i)
 		tbs, err := tmpl.MarshalTBSCertificate(ca.id, mtc.Serial(ca.config.LogNumber, index))

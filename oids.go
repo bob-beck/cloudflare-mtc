@@ -87,6 +87,13 @@ var IANAOIDs = OIDSet{
 	MTCCertificationAuthoritySHA256: OIDMTCCertificationAuthoritySHA256IANA,
 }
 
+func oidSet(iana bool) OIDSet {
+	if iana {
+		return IANAOIDs
+	}
+	return ExperimentalOIDs
+}
+
 // IsMTCProofOID reports whether oid is id-alg-mtcProof, experimental or
 // IANA.
 func IsMTCProofOID(oid asn1.ObjectIdentifier) bool {

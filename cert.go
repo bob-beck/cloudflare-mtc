@@ -107,6 +107,9 @@ type Template struct {
 	// subjectPublicKeyInfo: optional unique identifiers and the [3]
 	// extensions, exactly as they appear in the TBSCertificate.
 	Rest []byte
+
+	// IANA writes the IANA-assigned OIDs rather than the draft's.
+	IANA bool
 }
 
 // dummyKey signs throwaway certificates in NewTemplateFromX509; only the
@@ -210,7 +213,7 @@ func Serial(logNumber uint16, index uint64) uint64 {
 //
 // See draft-ietf-plants-merkle-tree-certs-06, Section 6.2.
 func (tmpl *Template) MarshalTBSCertificate(caID TrustAnchorID, serial uint64) ([]byte, error) {
-	return tmpl.marshalTBSCertificate(caID, serial, ExperimentalOIDs)
+	return tmpl.marshalTBSCertificate(caID, serial, oidSet(tmpl.IANA))
 }
 
 func (tmpl *Template) marshalTBSCertificate(caID TrustAnchorID, serial uint64, oids OIDSet) ([]byte, error) {
@@ -288,6 +291,9 @@ type CAParams struct {
 	// PrefixURL, if set, is the c2sp.org/mtc-tlog CA prefix URL, carried in
 	// a non-critical extension.
 	PrefixURL string
+
+	// IANA writes the IANA-assigned OIDs rather than the draft's.
+	IANA bool
 }
 
 func addUnsignedAlgorithmIdentifier(b *cryptobyte.Builder) {
@@ -357,7 +363,7 @@ func marshalUnsignedCertificate(attrType asn1.ObjectIdentifier, id TrustAnchorID
 //
 // See draft-ietf-plants-merkle-tree-certs-06, Section 5.5.
 func MarshalCACertificate(p *CAParams) ([]byte, error) {
-	return marshalCACertificate(p, ExperimentalOIDs)
+	return marshalCACertificate(p, oidSet(p.IANA))
 }
 
 func marshalCACertificate(p *CAParams, oids OIDSet) ([]byte, error) {

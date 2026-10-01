@@ -90,6 +90,7 @@ func caCommand() *cli.Command {
 					&cli.StringFlag{Name: "prefix-url", Usage: "c2sp.org/mtc-tlog CA prefix `URL`"},
 					&cli.DurationFlag{Name: "max-lifetime", Usage: "maximum certificate lifetime", Value: 7 * 24 * time.Hour},
 					&cli.DurationFlag{Name: "landmark-interval", Usage: "time between landmarks", Value: time.Hour},
+					&cli.BoolFlag{Name: "iana-oids", Usage: "issue with the IANA OIDs instead of the draft's"},
 				},
 				Action: func(c *cli.Context) error {
 					if c.NArg() != 1 {
@@ -104,6 +105,7 @@ func caCommand() *cli.Command {
 						PrefixURL:        c.String("prefix-url"),
 						MaxLifetime:      c.Duration("max-lifetime"),
 						LandmarkInterval: c.Duration("landmark-interval"),
+						IANAOIDs:         c.Bool("iana-oids"),
 					})
 					if err != nil {
 						return err

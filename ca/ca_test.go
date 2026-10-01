@@ -7,6 +7,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
 	"fmt"
 	"net/http/httptest"
@@ -228,6 +230,54 @@ func TestIssueWithMirror(t *testing.T) {
 	mcp, err := torchwood.ParseCheckpoint(n.Text)
 	if err != nil || mcp.Tree != c.Tree {
 		t.Errorf("mirror checkpoint %+v, CA %+v", mcp, c)
+	}
+}
+
+func TestIssueWithIANAOIDs(t *testing.T) {
+	a, err := New(filepath.Join(t.TempDir(), "ca"), NewOpts{ID: "32473.1", IANAOIDs: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	queue(t, a, 1)
+	res, err := a.Issue(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	caDER := readCert(t, filepath.Join(a.Dir(), "ca-cert.pem"))
+	caCert, err := mtc.ParseCACertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafDER := readCert(t, res.Certs[0].Path)
+	if _, err := mtc.Verify(leafDER, &mtc.VerifyOptions{CAs: []*mtc.TrustedCA{caCert}}); err != nil {
+		t.Fatal(err)
+	}
+	ca, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []pkix.Name{ca.Subject, leaf.Issuer} {
+		if len(name.Names) != 1 || !name.Names[0].Type.Equal(mtc.OIDRDNATrustAnchorIDIANA) {
+			t.Errorf("trust anchor ID name %v", name.Names)
+		}
+	}
+	for _, e := range ca.Extensions {
+		if e.Id.Equal(mtc.OIDMTCCertificationAuthoritySHA256) {
+			t.Error("CA certificate carries the experimental CA extension")
+		}
+	}
+	wantSigAlg, _ := asn1.Marshal(struct{ Algorithm asn1.ObjectIdentifier }{mtc.OIDMTCProofIANA})
+	tbs, err := mtc.ParseTBSCertificate(leaf.RawTBSCertificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(tbs.Signature, wantSigAlg) {
+		t.Errorf("leaf signature algorithm %x, want %x", tbs.Signature, wantSigAlg)
 	}
 }
 
