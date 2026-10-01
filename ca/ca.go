@@ -356,6 +356,13 @@ func (ca *CA) queued() ([]string, error) {
 	return names, nil
 }
 
+// Issued is where a queued request's certificate ended up, served at
+// GET /queue?id=<queue ID>.
+type Issued struct {
+	LogNumber uint16 `json:"log_number"`
+	Index     uint64 `json:"index"`
+}
+
 // IssuedCert describes a certificate written by Issue.
 type IssuedCert struct {
 	QueueID  string
@@ -563,6 +570,12 @@ func (ca *CA) issueQueued(now time.Time, names []string, res *IssueResult) error
 		}
 		qid := strings.TrimSuffix(names[i], ".json")
 		if err := writeJSON(filepath.Join(ca.CertDir(), fmt.Sprintf("%d.json", index)), map[string]any{"queue_id": qid}); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Join(ca.dir, "issued"), 0o755); err != nil {
+			return err
+		}
+		if err := writeJSON(filepath.Join(ca.dir, "issued", qid+".json"), &Issued{LogNumber: ca.config.LogNumber, Index: index}); err != nil {
 			return err
 		}
 		res.Certs = append(res.Certs, IssuedCert{QueueID: qid, Index: index, Path: path})

@@ -29,6 +29,8 @@ import (
 //	POST /queue                          queue a request; the body is a PEM
 //	                                     CERTIFICATE (used as a template) or
 //	                                     PUBLIC KEY plus ?dns=... names
+//	GET  /queue?id=<queue ID>            the log number and index of the
+//	                                     request's certificate, or 202
 //
 // The layout under /<log>/ follows c2sp.org/mtc-tlog.
 func (ca *CA) Handler() http.Handler {
@@ -43,7 +45,28 @@ func (ca *CA) Handler() http.Handler {
 	mux.HandleFunc("GET /{log}/cert/{index}", ca.handleCert(false))
 	mux.HandleFunc("GET /{log}/cert/{index}/landmark", ca.handleCert(true))
 	mux.HandleFunc("POST /queue", ca.handleQueue)
+	mux.HandleFunc("GET /queue", ca.handleQueueStatus)
 	return mux
+}
+
+func (ca *CA) handleQueueStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" || filepath.Base(id) != id || strings.ContainsAny(id, "./") {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := os.Stat(filepath.Join(ca.dir, "queue", id+".json")); err == nil {
+		w.Header().Set("Retry-After", "10")
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(ca.dir, "issued", id+".json"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
 }
 
 func (ca *CA) logNumber(r *http.Request) (string, bool) {
